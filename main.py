@@ -4,13 +4,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import signal
 from scipy.interpolate import interp1d
-import io
 
 # ============================================================
 # CONFIGURAÇÃO DA PÁGINA
 # ============================================================
 st.set_page_config(
-    page_title="Análise Sentar-Levantar",
+    page_title="Análise Sentar-Levantar (Eixo Y)",
     page_icon="📊",
     layout="wide"
 )
@@ -20,12 +19,9 @@ st.set_page_config(
 # ============================================================
 @st.cache_data
 def carregar_dados(arquivo):
-    """Carrega o CSV do acelerômetro a partir de um arquivo enviado."""
+    """Carrega o CSV do acelerômetro."""
     try:
-        # Tenta ler com separador ';'
         df = pd.read_csv(arquivo, sep=';')
-        
-        # Padroniza nomes das colunas
         df.columns = ['tempo_ms', 'X', 'Y', 'Z']
         df['tempo_s'] = df['tempo_ms'] / 1000.0
         return df
@@ -34,9 +30,8 @@ def carregar_dados(arquivo):
         return None
 
 
-def interpolar_100hz(df):
-    """Interpola para 100 Hz uniforme."""
-    fs_alvo = 100
+def interpolar_100hz(df, fs_alvo=100):
+    """Interpola para frequência uniforme."""
     t_original = df['tempo_s'].values
     t_novo = np.arange(t_original[0], t_original[-1], 1.0/fs_alvo)
     
@@ -57,7 +52,7 @@ def aplicar_detrend(df, eixos=['X', 'Y', 'Z']):
 
 
 def filtrar_sinal(df, fs, fc=8.0, ordem=4, eixos=['X', 'Y', 'Z']):
-    """Filtro Butterworth passa-baixa 8 Hz."""
+    """Filtro Butterworth passa-baixa."""
     nyq = fs / 2.0
     b, a = signal.butter(ordem, fc/nyq, btype='low')
     df_filtrado = df.copy()
@@ -66,18 +61,18 @@ def filtrar_sinal(df, fs, fc=8.0, ordem=4, eixos=['X', 'Y', 'Z']):
     return df_filtrado
 
 
-def processar_acelerometro(df_original):
-    """Pipeline completo de processamento."""
-    df_interp, fs = interpolar_100hz(df_original)
+def processar_acelerometro(df_original, fs_alvo=100, fc=8.0):
+    """Pipeline completo."""
+    df_interp, fs = interpolar_100hz(df_original, fs_alvo)
     df_detrend = aplicar_detrend(df_interp)
-    df_filtrado = filtrar_sinal(df_detrend, fs, fc=8.0, ordem=4)
+    df_filtrado = filtrar_sinal(df_detrend, fs, fc=fc)
     return df_filtrado, fs
 
 
 # ============================================================
 # INTERFACE STREAMLIT
 # ============================================================
-st.title("📊 Análise do Teste Sentar-Levantar")
+st.title("📊 Análise do Teste Sentar-Levantar — Eixo Y")
 st.markdown("---")
 
 # --- UPLOAD DO ARQUIVO ---
@@ -86,13 +81,6 @@ arquivo = st.sidebar.file_uploader(
     "📁 Carregue o arquivo do acelerômetro (.txt ou .csv)",
     type=['txt', 'csv'],
     help="Arquivo com colunas: DURACAO;ACC EIXO X;ACC EIXO Y;ACC EIXO Z"
-)
-
-# --- SELEÇÃO DO EIXO ---
-eixo_escolhido = st.sidebar.selectbox(
-    "🎯 Selecione o eixo para visualizar",
-    ['Z', 'Y', 'X'],
-    help="O eixo vertical (que registra a gravidade) depende da orientação do celular"
 )
 
 # --- PARÂMETROS DO FILTRO ---
@@ -109,7 +97,6 @@ if arquivo is not None:
         df_original = carregar_dados(arquivo)
         
         if df_original is not None:
-            # Informações do arquivo
             st.success("✅ Arquivo carregado com sucesso!")
             
             col1, col2, col3 = st.columns(3)
@@ -119,50 +106,41 @@ if arquivo is not None:
                        f"{1000/np.mean(np.diff(df_original['tempo_ms'])):.1f} Hz")
             
             # Processamento
-            df_proc, fs = processar_acelerometro(df_original)
+            df_proc, fs = processar_acelerometro(df_original, fs_alvo=fs_alvo, fc=fc)
             
             st.markdown("---")
-            st.subheader(f"📈 Sinal Processado - Eixo {eixo_escolhido}")
+            st.subheader("📈 Sinal Processado — Eixo Y (Vertical)")
             
-            # Gráfico do eixo escolhido
+            # Gráfico apenas do eixo Y
             fig, ax = plt.subplots(figsize=(12, 5))
-            ax.plot(df_proc['tempo_s'], df_proc[eixo_escolhido], 
-                   linewidth=0.8, color='steelblue')
+            ax.plot(df_proc['tempo_s'], df_proc['Y'], 
+                   linewidth=0.8, color='green')
             ax.set_xlabel('Tempo (s)', fontsize=12)
-            ax.set_ylabel(f'Aceleração - Eixo {eixo_escolhido} (g)', fontsize=12)
-            ax.set_title(f'Eixo {eixo_escolhido} (Fs={fs} Hz, LP={fc} Hz, detrend)', 
+            ax.set_ylabel('Aceleração - Eixo Y (g)', fontsize=12)
+            ax.set_title(f'Eixo Y (Fs={fs} Hz, LP={fc} Hz, detrend)', 
                         fontsize=13, fontweight='bold')
             ax.grid(True, alpha=0.3)
             ax.set_xlim(df_proc['tempo_s'].iloc[0], df_proc['tempo_s'].iloc[-1])
+            plt.tight_layout()
             st.pyplot(fig)
             plt.close(fig)
             
-            # Todos os eixos
+            # Estatísticas do eixo Y
             st.markdown("---")
-            st.subheader("📊 Todos os Eixos")
-            fig2, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
-            cores = {'X': 'red', 'Y': 'green', 'Z': 'blue'}
-            
-            for i, eixo in enumerate(['X', 'Y', 'Z']):
-                axes[i].plot(df_proc['tempo_s'], df_proc[eixo], 
-                            linewidth=0.8, color=cores[eixo])
-                axes[i].set_ylabel(f'Eixo {eixo} (g)', fontsize=11)
-                axes[i].grid(True, alpha=0.3)
-                axes[i].set_title(f'Eixo {eixo}', fontsize=11, fontweight='bold')
-            
-            axes[-1].set_xlabel('Tempo (s)', fontsize=12)
-            fig2.suptitle('Acelerômetro - Teste Sentar-Levantar', 
-                         fontsize=13, fontweight='bold', y=1.02)
-            plt.tight_layout()
-            st.pyplot(fig2)
-            plt.close(fig2)
+            st.subheader("📋 Estatísticas do Eixo Y")
+            stat1, stat2, stat3, stat4 = st.columns(4)
+            stat1.metric("Média", f"{df_proc['Y'].mean():.4f} g")
+            stat2.metric("Desvio Padrão", f"{df_proc['Y'].std():.4f} g")
+            stat3.metric("Máximo", f"{df_proc['Y'].max():.4f} g")
+            stat4.metric("Mínimo", f"{df_proc['Y'].min():.4f} g")
             
             # Download dos dados processados
+            st.markdown("---")
             csv = df_proc.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="💾 Baixar dados processados (CSV)",
                 data=csv,
-                file_name="acelerometro_processado.csv",
+                file_name="acelerometro_eixoY_processado.csv",
                 mime="text/csv"
             )
 
@@ -173,16 +151,13 @@ else:
     ### 📖 Como usar
     
     1. **Carregue o arquivo** `.txt` ou `.csv` na barra lateral
-    2. **Selecione o eixo** que deseja visualizar (X, Y ou Z)
-    3. **Ajuste os parâmetros** do filtro se necessário
-    4. **Analise** o sinal processado
+    2. **Ajuste os parâmetros** do filtro se necessário
+    3. **Analise** o sinal do eixo Y processado
     
-    ### 🔍 Identificando o eixo vertical
+    ### 🎯 Sobre o Eixo Y
     
-    O eixo que registra a gravidade depende de como o celular foi posicionado:
-    - **Z**: celular em pé (retrato)
-    - **Y**: celular deitado (paisagem)
-    - **X**: menos comum como eixo vertical
+    O eixo Y é o **eixo vertical** quando o celular está em modo **paisagem** (deitado). 
+    Ele registra a aceleração da gravidade e os movimentos de sentar e levantar.
     
     ### ⚙️ Processamento aplicado
     
